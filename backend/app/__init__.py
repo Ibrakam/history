@@ -1,0 +1,2 @@
+"""History lesson generator backend."""
+

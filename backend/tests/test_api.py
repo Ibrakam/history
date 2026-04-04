@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR))
+TEST_DB_PATH = Path(__file__).resolve().parents[1] / "test_history.db"
+if TEST_DB_PATH.exists():
+    TEST_DB_PATH.unlink()
+
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["USE_DEMO_AI"] = "true"
+os.environ["ENABLE_EXTERNAL_MEDIA_SEARCH"] = "false"
+os.environ["SETTINGS_SOURCE_PRIORITY"] = "env_first"
+
+from backend.app.config import get_settings
+from backend.app.main import app
+
+
+client = TestClient(app)
+
+
+def auth_headers() -> dict[str, str]:
+    settings = get_settings()
+    response = client.post(
+        "/api/admin/login",
+        json={"username": settings.admin_username, "password": settings.admin_password},
+    )
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def build_generated_payload(topic: str = "Древняя Русь") -> dict:
+    response = client.post(
+        "/api/admin/lessons/generate",
+        headers=auth_headers(),
+        json={"topic": topic},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_login_success() -> None:
+    settings = get_settings()
+    response = client.post(
+        "/api/admin/login",
+        json={"username": settings.admin_username, "password": settings.admin_password},
+    )
+    assert response.status_code == 200
+    assert response.json()["access_token"]
+
+
+def test_login_failure() -> None:
+    response = client.post("/api/admin/login", json={"username": "bad", "password": "bad"})
+    assert response.status_code == 401
+
+
+def test_generate_demo_lesson_returns_layout_and_slots() -> None:
+    payload = build_generated_payload()
+    assert payload["title"]
+    assert payload["visualMode"] == "chronicle"
+    assert payload["lessonLayout"]["hero"]["slotId"] == "hero-main"
+    assert payload["lessonLayout"]["imageSlots"]
+    assert payload["quiz"]
+
+
+def test_create_lesson_persists_layout_and_sanitizes_legacy_html() -> None:
+    generated = build_generated_payload("Петровские реформы")
+    generated["lessonHtml"] = "<h2>ok</h2><script>alert(1)</script>"
+    response = client.post("/api/admin/lessons", headers=auth_headers(), json=generated)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lessonLayout"]["sections"]
+    assert "<script>" not in payload["lessonHtml"]
+
+
+def test_refresh_slot_images_returns_slot() -> None:
+    generated = build_generated_payload("Куликовская битва")
+    create_response = client.post("/api/admin/lessons", headers=auth_headers(), json=generated)
+    lesson_id = create_response.json()["id"]
+
+    slot_id = create_response.json()["lessonLayout"]["imageSlots"][0]["slotId"]
+    response = client.post(
+        f"/api/admin/lessons/{lesson_id}/refresh-slot-images",
+        headers=auth_headers(),
+        json={"slotId": slot_id},
+    )
+    assert response.status_code == 200
+    assert response.json()["slot"]["slotId"] == slot_id
+
+
+def test_public_endpoint_hides_candidate_images_and_queries() -> None:
+    generated = build_generated_payload("Киевская Русь")
+    create_response = client.post("/api/admin/lessons", headers=auth_headers(), json=generated)
+    lesson_id = create_response.json()["id"]
+    client.post(f"/api/admin/lessons/{lesson_id}/publish", headers=auth_headers())
+    slug = create_response.json()["slug"]
+
+    response = client.get(f"/api/public/lessons/{slug}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lessonLayout"]["imageSlots"][0]["candidateAssets"] == []
+    assert payload["lessonLayout"]["imageSlots"][0]["searchQueries"] == []
+
+
+def test_legacy_unpublished_lesson_not_available_publicly() -> None:
+    response = client.post(
+        "/api/admin/lessons",
+        headers=auth_headers(),
+        json={
+            "title": "Старый урок",
+            "topic": "История",
+            "heroSubtitle": "Старый HTML урок",
+            "visualMode": "archive",
+            "lessonLayout": None,
+            "lessonHtml": "<h2>Черновик</h2><p>Текст для проверки.</p>",
+            "quiz": [
+                {
+                    "prompt": "Вопрос 1",
+                    "options": ["1", "2", "3", "4"],
+                    "correctOptionIndex": 0,
+                    "explanation": "Пояснение",
+                },
+                {
+                    "prompt": "Вопрос 2",
+                    "options": ["1", "2", "3", "4"],
+                    "correctOptionIndex": 1,
+                    "explanation": "Пояснение",
+                },
+                {
+                    "prompt": "Вопрос 3",
+                    "options": ["1", "2", "3", "4"],
+                    "correctOptionIndex": 2,
+                    "explanation": "Пояснение",
+                },
+            ],
+        },
+    )
+    slug = response.json()["slug"]
+    public_response = client.get(f"/api/public/lessons/{slug}")
+    assert public_response.status_code == 404
+
+
+def test_submit_quiz_returns_score_without_persistence() -> None:
+    generated = build_generated_payload("Древняя Русь")
+    create_response = client.post("/api/admin/lessons", headers=auth_headers(), json=generated)
+    lesson_id = create_response.json()["id"]
+    client.post(f"/api/admin/lessons/{lesson_id}/publish", headers=auth_headers())
+    slug = create_response.json()["slug"]
+
+    response = client.post(
+        f"/api/public/lessons/{slug}/submit-quiz",
+        json={"answers": [0, 1, 3]},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["score"] == 2
+    assert payload["total"] == 3
+    assert len(payload["answerReview"]) == 3
+
+
+def test_delete_lesson_removes_it_from_admin_list() -> None:
+    generated = build_generated_payload("Удаляемый урок")
+    create_response = client.post("/api/admin/lessons", headers=auth_headers(), json=generated)
+    lesson_id = create_response.json()["id"]
+
+    delete_response = client.delete(f"/api/admin/lessons/{lesson_id}", headers=auth_headers())
+    assert delete_response.status_code == 204
+
+    list_response = client.get("/api/admin/lessons", headers=auth_headers())
+    assert lesson_id not in [lesson["id"] for lesson in list_response.json()]
