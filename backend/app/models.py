@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -50,6 +50,11 @@ class Lesson(Base):
         cascade="all, delete-orphan",
         order_by="QuizQuestion.position",
     )
+    quiz_attempts: Mapped[list["QuizAttempt"]] = relationship(
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        order_by="QuizAttempt.created_at.desc()",
+    )
 
 
 class QuizQuestion(Base):
@@ -64,3 +69,21 @@ class QuizQuestion(Base):
     explanation: Mapped[str] = mapped_column(Text)
 
     lesson: Mapped[Lesson] = relationship(back_populates="quiz_questions")
+
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"), index=True)
+    student_name: Mapped[str] = mapped_column(String(100))
+    score: Mapped[int] = mapped_column(Integer)
+    total: Mapped[int] = mapped_column(Integer)
+    percentage: Mapped[float] = mapped_column(Float, default=0.0)
+    answers: Mapped[list[int | None]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )
+
+    lesson: Mapped[Lesson] = relationship(back_populates="quiz_attempts")

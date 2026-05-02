@@ -1,5 +1,15 @@
+import { useEffect, useRef } from "react";
+
 import { VISUAL_MODES } from "../theme";
-import type { ArtifactCard, LessonLayout, LessonSection, MediaAsset, PersonCard, VisualMode } from "../types";
+import type {
+  ArtifactCard,
+  ImageSlot,
+  LessonLayout,
+  LessonSection,
+  MediaAsset,
+  PersonCard,
+  VisualMode,
+} from "../types";
 
 type Props = {
   title: string;
@@ -8,7 +18,37 @@ type Props = {
   layout: LessonLayout | null;
   lessonHtml?: string;
   renderMode?: "preview" | "public";
+  onEditSlot?: (slotId: string) => void;
 };
+
+function useScrollReveal(enabled: boolean) {
+  const containerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!enabled || !containerRef.current) return;
+
+    const targets = containerRef.current.querySelectorAll(".scroll-reveal");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.12 },
+    );
+
+    for (const target of targets) {
+      observer.observe(target);
+    }
+
+    return () => observer.disconnect();
+  }, [enabled]);
+
+  return containerRef;
+}
 
 function assetCaption(asset: MediaAsset | null | undefined) {
   if (!asset || asset.provider === "demo") {
@@ -21,18 +61,36 @@ function MediaFigure({
   asset,
   className,
   caption,
+  slotId,
+  onEdit,
 }: {
   asset: MediaAsset | null | undefined;
   className?: string;
   caption?: string;
+  slotId?: string | null;
+  onEdit?: (slotId: string) => void;
 }) {
+  const editable = Boolean(onEdit && slotId);
   return (
-    <figure className={className ?? "media-figure"}>
+    <figure className={`${className ?? "media-figure"}${editable ? " media-editable" : ""}`}>
       {asset ? (
         <img src={asset.imageUrl} alt={asset.alt || asset.title} />
       ) : (
         <div className="media-placeholder">Исторический визуал</div>
       )}
+      {editable ? (
+        <button
+          type="button"
+          className="media-edit-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (slotId && onEdit) onEdit(slotId);
+          }}
+        >
+          <span aria-hidden="true">⤓</span> Сменить фото
+        </button>
+      ) : null}
       {caption ? <figcaption className="media-caption">{caption}</figcaption> : null}
     </figure>
   );
@@ -50,13 +108,18 @@ function SectionIntro({ label, section }: { label: string; section: LessonSectio
 
 function SectionNarrative({
   section,
-  asset,
+  slot,
+  revealClass = "",
+  onEditSlot,
 }: {
   section: LessonSection;
-  asset: MediaAsset | null | undefined;
+  slot: ImageSlot | undefined;
+  revealClass?: string;
+  onEditSlot?: (slotId: string) => void;
 }) {
+  const asset = slot?.selectedAsset;
   return (
-    <section className="visual-section narrative-section">
+    <section className={`visual-section narrative-section${revealClass}`}>
       <div className="section-shell section-shell-split">
         <div className="section-story">
           <SectionIntro label="Контекст" section={section} />
@@ -68,7 +131,13 @@ function SectionNarrative({
         </div>
 
         <div className="section-stage">
-          <MediaFigure asset={asset} className="section-image narrative-image" caption={assetCaption(asset)} />
+          <MediaFigure
+            asset={asset}
+            className="section-image narrative-image"
+            caption={assetCaption(asset)}
+            slotId={slot?.slotId}
+            onEdit={onEditSlot}
+          />
           <div className="section-side-note">
             <span>Визуальный фрагмент</span>
             <strong>{asset?.title || section.title}</strong>
@@ -81,16 +150,27 @@ function SectionNarrative({
 
 function SectionTimeline({
   section,
-  asset,
+  slot,
+  revealClass = "",
+  onEditSlot,
 }: {
   section: LessonSection;
-  asset: MediaAsset | null | undefined;
+  slot: ImageSlot | undefined;
+  revealClass?: string;
+  onEditSlot?: (slotId: string) => void;
 }) {
+  const asset = slot?.selectedAsset;
   return (
-    <section className="visual-section timeline-section">
+    <section className={`visual-section timeline-section${revealClass}`}>
       <SectionIntro label="Хронология" section={section} />
       <div className="timeline-layout">
-        <MediaFigure asset={asset} className="timeline-figure" caption={assetCaption(asset)} />
+        <MediaFigure
+          asset={asset}
+          className="timeline-figure"
+          caption={assetCaption(asset)}
+          slotId={slot?.slotId}
+          onEdit={onEditSlot}
+        />
         <div className="timeline-grid">
           {section.timelineItems.map((item) => (
             <article key={`${section.id}-${item.year}-${item.title}`} className="timeline-card">
@@ -108,14 +188,23 @@ function SectionTimeline({
 
 function PersonTile({
   card,
-  asset,
+  slot,
+  onEditSlot,
 }: {
   card: PersonCard;
-  asset: MediaAsset | null | undefined;
+  slot: ImageSlot | undefined;
+  onEditSlot?: (slotId: string) => void;
 }) {
+  const asset = slot?.selectedAsset;
   return (
     <article className="entity-card person-card">
-      <MediaFigure asset={asset} className="entity-figure" caption={assetCaption(asset)} />
+      <MediaFigure
+        asset={asset}
+        className="entity-figure"
+        caption={assetCaption(asset)}
+        slotId={slot?.slotId}
+        onEdit={onEditSlot}
+      />
       <div className="entity-copy">
         <span>{card.role}</span>
         <h3>{card.name}</h3>
@@ -127,14 +216,23 @@ function PersonTile({
 
 function ArtifactTile({
   card,
-  asset,
+  slot,
+  onEditSlot,
 }: {
   card: ArtifactCard;
-  asset: MediaAsset | null | undefined;
+  slot: ImageSlot | undefined;
+  onEditSlot?: (slotId: string) => void;
 }) {
+  const asset = slot?.selectedAsset;
   return (
     <article className="artifact-card">
-      <MediaFigure asset={asset} className="artifact-figure" caption={assetCaption(asset)} />
+      <MediaFigure
+        asset={asset}
+        className="artifact-figure"
+        caption={assetCaption(asset)}
+        slotId={slot?.slotId}
+        onEdit={onEditSlot}
+      />
       <div className="entity-copy">
         <span>Экспонат эпохи</span>
         <h3>{card.title}</h3>
@@ -151,8 +249,13 @@ export function LessonRenderer({
   layout,
   lessonHtml,
   renderMode = "public",
+  onEditSlot,
 }: Props) {
   const themeMeta = VISUAL_MODES[visualMode];
+  const isPublic = renderMode === "public";
+  const containerRef = useScrollReveal(isPublic);
+  const reveal = isPublic ? " scroll-reveal" : "";
+  const editor = renderMode === "preview" ? onEditSlot : undefined;
 
   if (!layout) {
     return (
@@ -185,30 +288,41 @@ export function LessonRenderer({
     );
   }
 
-  const slotMap = new Map(layout.imageSlots.map((slot) => [slot.slotId, slot.selectedAsset]));
-  const orderedAssets = layout.imageSlots.map((slot) => slot.selectedAsset).filter(Boolean) as MediaAsset[];
-  const fallbackAsset = (fallbackIndex = 0) =>
-    orderedAssets.length ? orderedAssets[Math.abs(fallbackIndex) % orderedAssets.length] : undefined;
-  const heroAsset =
-    slotMap.get(layout.hero.slotId) ??
-    layout.imageSlots.find((slot) => slot.role === "hero")?.selectedAsset ??
-    fallbackAsset(0);
+  const slotList = layout.imageSlots;
+  const slotsWithAsset = slotList.filter((slot) => slot.selectedAsset);
 
-  const resolveAsset = (slotId?: string | null, role?: string, fallbackIndex = 0) => {
-    if (slotId && slotMap.get(slotId)) {
-      return slotMap.get(slotId);
+  const fallbackSlot = (fallbackIndex = 0): ImageSlot | undefined => {
+    if (slotsWithAsset.length) {
+      return slotsWithAsset[Math.abs(fallbackIndex) % slotsWithAsset.length];
     }
-    if (role) {
-      const roleAsset = layout.imageSlots.find((slot) => slot.role === role)?.selectedAsset;
-      if (roleAsset) {
-        return roleAsset;
-      }
-    }
-    return fallbackAsset(fallbackIndex);
+    return slotList[Math.abs(fallbackIndex) % Math.max(slotList.length, 1)];
   };
 
+  const resolveSlot = (
+    slotId?: string | null,
+    role?: string,
+    fallbackIndex = 0,
+  ): ImageSlot | undefined => {
+    if (slotId) {
+      const direct = slotList.find((slot) => slot.slotId === slotId);
+      if (direct?.selectedAsset) return direct;
+    }
+    if (role) {
+      const roleSlot = slotList.find((slot) => slot.role === role && slot.selectedAsset);
+      if (roleSlot) return roleSlot;
+    }
+    if (slotId) {
+      const direct = slotList.find((slot) => slot.slotId === slotId);
+      if (direct) return direct;
+    }
+    return fallbackSlot(fallbackIndex);
+  };
+
+  const heroSlot = resolveSlot(layout.hero.slotId, "hero", 0);
+  const heroAsset = heroSlot?.selectedAsset;
+
   return (
-    <article className={`lesson-renderer lesson-renderer-${renderMode} visual-mode-${visualMode}`}>
+    <article ref={containerRef} className={`lesson-renderer lesson-renderer-${renderMode} visual-mode-${visualMode}`}>
       <header className="visual-hero">
         <div className="hero-content-shell">
           <div className="hero-meta-row">
@@ -224,7 +338,13 @@ export function LessonRenderer({
             </div>
 
             <div className="hero-visual-column">
-              <MediaFigure asset={heroAsset} className="hero-figure" caption={assetCaption(heroAsset)} />
+              <MediaFigure
+                asset={heroAsset}
+                className="hero-figure"
+                caption={assetCaption(heroAsset)}
+                slotId={heroSlot?.slotId}
+                onEdit={editor}
+              />
               <aside className="hero-side-card">
                 <div className="hero-side-meta">
                   <span>Подход</span>
@@ -245,7 +365,9 @@ export function LessonRenderer({
                 <SectionNarrative
                   key={section.id}
                   section={section}
-                  asset={resolveAsset(section.slotId, index % 2 === 0 ? "section" : "artifact", index + 1)}
+                  slot={resolveSlot(section.slotId, index % 2 === 0 ? "section" : "artifact", index + 1)}
+                  revealClass={reveal}
+                  onEditSlot={editor}
                 />
               );
             }
@@ -255,21 +377,24 @@ export function LessonRenderer({
                 <SectionTimeline
                   key={section.id}
                   section={section}
-                  asset={resolveAsset(section.slotId, "timeline", index + 1)}
+                  slot={resolveSlot(section.slotId, "timeline", index + 1)}
+                  revealClass={reveal}
+                  onEditSlot={editor}
                 />
               );
             }
 
             if (section.blockType === "person_card_grid") {
               return (
-                <section key={section.id} className="visual-section grid-section person-grid-section">
+                <section key={section.id} className={`visual-section grid-section person-grid-section${reveal}`}>
                   <SectionIntro label="Персоны" section={section} />
                   <div className="entity-grid">
                     {section.personCards.map((card, cardIndex) => (
                       <PersonTile
                         key={`${section.id}-${card.name}`}
                         card={card}
-                        asset={resolveAsset(card.slotId, "person", cardIndex + index + 1)}
+                        slot={resolveSlot(card.slotId, "person", cardIndex + index + 1)}
+                        onEditSlot={editor}
                       />
                     ))}
                   </div>
@@ -279,14 +404,15 @@ export function LessonRenderer({
 
             if (section.blockType === "artifact_gallery") {
               return (
-                <section key={section.id} className="visual-section gallery-section">
+                <section key={section.id} className={`visual-section gallery-section${reveal}`}>
                   <SectionIntro label="Артефакты" section={section} />
                   <div className="artifact-grid">
                     {section.artifactCards.map((card, cardIndex) => (
                       <ArtifactTile
                         key={`${section.id}-${card.title}`}
                         card={card}
-                        asset={resolveAsset(card.slotId, "artifact", cardIndex + index + 1)}
+                        slot={resolveSlot(card.slotId, "artifact", cardIndex + index + 1)}
+                        onEditSlot={editor}
                       />
                     ))}
                   </div>
@@ -294,8 +420,10 @@ export function LessonRenderer({
               );
             }
 
+            const quoteSlot = resolveSlot(section.slotId, "quote", index + 1);
+            const quoteAsset = quoteSlot?.selectedAsset;
             return (
-              <section key={section.id} className="visual-section quote-section">
+              <section key={section.id} className={`visual-section quote-section${reveal}`}>
                 <div className="quote-panel">
                   <span className="section-kicker">Источник настроения</span>
                   <h2>{section.title}</h2>
@@ -303,9 +431,11 @@ export function LessonRenderer({
                   {section.quoteCaption ? <p className="quote-caption">{section.quoteCaption}</p> : null}
                 </div>
                 <MediaFigure
-                  asset={resolveAsset(section.slotId, "quote", index + 1)}
+                  asset={quoteAsset}
                   className="section-image quote-image"
-                  caption={assetCaption(resolveAsset(section.slotId, "quote", index + 1))}
+                  caption={assetCaption(quoteAsset)}
+                  slotId={quoteSlot?.slotId}
+                  onEdit={editor}
                 />
               </section>
             );

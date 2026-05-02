@@ -44,6 +44,9 @@ app.add_middleware(
 app.include_router(admin.router)
 app.include_router(public.router)
 
+settings.upload_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
+
 
 @app.get("/api/health")
 def healthcheck() -> dict:
@@ -52,8 +55,10 @@ def healthcheck() -> dict:
 
 frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
     @app.get("/{full_path:path}")
-    def spa_fallback(full_path: str) -> FileResponse:  # pragma: no cover
+    def spa_fallback(full_path: str) -> FileResponse:
+        file_path = (frontend_dist / full_path).resolve()
+        if file_path.is_relative_to(frontend_dist) and file_path.is_file():
+            return FileResponse(file_path)
         return FileResponse(frontend_dist / "index.html")

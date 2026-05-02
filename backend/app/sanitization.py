@@ -1,7 +1,7 @@
-import bleach
+import nh3
 
 
-ALLOWED_TAGS = [
+ALLOWED_TAGS = {
     "h1",
     "h2",
     "h3",
@@ -21,24 +21,23 @@ ALLOWED_TAGS = [
     "hr",
     "br",
     "img",
-]
-
-ALLOWED_ATTRIBUTES = {
-    "img": ["src", "alt", "title"],
-    "th": ["colspan", "rowspan"],
-    "td": ["colspan", "rowspan"],
 }
 
-ALLOWED_PROTOCOLS = ["http", "https"]
+ALLOWED_ATTRIBUTES = {
+    "img": {"src", "alt", "title"},
+    "th": {"colspan", "rowspan"},
+    "td": {"colspan", "rowspan"},
+}
+
+ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
 def sanitize_lesson_html(value: str) -> str:
-    cleaned = bleach.clean(
+    return nh3.clean(
         value,
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
-        protocols=ALLOWED_PROTOCOLS,
-        strip=True,
+        url_schemes=ALLOWED_URL_SCHEMES,
+        link_rel="noopener noreferrer",
     )
-    return bleach.linkify(cleaned)
 

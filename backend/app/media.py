@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from html import unescape
+import time
 from urllib.parse import quote
 
 import httpx
-import requests
 
 from .config import get_settings
 from .schemas import MediaAsset
@@ -18,6 +17,29 @@ VISUAL_ACCENTS = {
     "reform": "#2a6958",
     "archive": "#1f4d5c",
 }
+
+_CACHE: dict[str, tuple[float, list[MediaAsset]]] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def build_search_queries(label: str, topic: str, role: str, existing_queries: list[str] | None = None) -> list[str]:
+    base_queries = [q for q in (existing_queries or []) if isinstance(q, str) and q.strip()]
+
+    role_queries = {
+        "hero": [f"{topic} историческая живопись", f"{topic} реконструкция", f"{topic} архитектура"],
+        "section": [label or topic, f"историческая сцена {topic}", topic],
+        "timeline": [f"{topic} карта", f"{topic} хронология", f"{topic} схема"],
+        "person": [label or topic, f"{label} портрет" if label else f"{topic} исторический портрет", f"{topic} исторический портрет"],
+        "artifact": [label or topic, f"{topic} артефакт", f"{topic} предметы культуры"],
+        "quote": [label or topic, f"{topic} рукопись", f"{topic} исторический документ"],
+    }.get(role, [label or topic, topic])
+
+    ordered: list[str] = []
+    for query in [*role_queries, *base_queries]:
+        normalized = query.strip()
+        if normalized and normalized not in ordered:
+            ordered.append(normalized)
+    return ordered[:6]
 
 
 def build_demo_asset(label: str, visual_mode: str, slot_id: str) -> MediaAsset:
@@ -53,93 +75,104 @@ def build_demo_asset(label: str, visual_mode: str, slot_id: str) -> MediaAsset:
     )
 
 
-def _extract_extmetadata(metadata: dict, key: str) -> str:
-    raw = metadata.get(key, {})
-    if isinstance(raw, dict):
-        value = raw.get("value", "")
-    else:
-        value = raw or ""
-    return unescape(str(value)).strip()
-
-
 def _is_supported_image(url: str) -> bool:
     lowered = url.lower()
     return lowered.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"))
 
 
-async def search_wikimedia_assets(queries: list[str], limit: int = 6) -> list[MediaAsset]:
-    return await asyncio.to_thread(_search_wikimedia_assets_sync, queries, limit)
-
-
-def _search_wikimedia_assets_sync(queries: list[str], limit: int = 6) -> list[MediaAsset]:
-    seen_urls: set[str] = set()
+async def _search_single_query(client: httpx.AsyncClient, query: str, limit: int) -> list[MediaAsset]:
     assets: list[MediaAsset] = []
+    seen_urls: set[str] = set()
 
-    session = requests.Session()
-    session.headers.update({"User-Agent": "HistoryAI/1.0 (school-project contact: local-app)"})
-
-    for query in queries:
+    for project in ("ru", "en"):
         if len(assets) >= limit:
             break
-        if not query.strip():
-            continue
 
-        for project in ("ru", "en"):
-            if len(assets) >= limit:
-                break
-
-            response = session.get(
+        try:
+            response = await client.get(
                 f"https://{project}.wikipedia.org/w/rest.php/v1/search/title",
                 params={"q": query, "limit": str(limit)},
-                timeout=20,
             )
             response.raise_for_status()
             pages = response.json().get("pages", [])
+        except Exception:
+            continue
 
-            for page in pages:
-                key = page.get("key")
-                if not key:
-                    continue
+        for page in pages:
+            if len(assets) >= limit:
+                break
+            key = page.get("key")
+            if not key:
+                continue
 
-                summary_response = session.get(
+            try:
+                summary_response = await client.get(
                     f"https://{project}.wikipedia.org/api/rest_v1/page/summary/{key}",
-                    timeout=20,
                 )
                 summary_response.raise_for_status()
                 summary = summary_response.json()
-                thumbnail = summary.get("thumbnail", {})
-                image_url = thumbnail.get("source")
-                if image_url and image_url.startswith("//"):
-                    image_url = f"https:{image_url}"
-                if not image_url or image_url in seen_urls or not _is_supported_image(image_url):
-                    continue
+            except Exception:
+                continue
 
-                source_url = (
-                    summary.get("content_urls", {})
-                    .get("desktop", {})
-                    .get("page", f"https://{project}.wikipedia.org/wiki/{key}")
-                )
-                title = summary.get("title") or page.get("title") or key.replace("_", " ")
-                description = summary.get("extract") or page.get("description") or title
+            thumbnail = summary.get("thumbnail", {})
+            image_url = thumbnail.get("source")
+            if image_url and image_url.startswith("//"):
+                image_url = f"https:{image_url}"
+            if not image_url or image_url in seen_urls or not _is_supported_image(image_url):
+                continue
 
-                assets.append(
-                    MediaAsset(
-                        assetId=f"wikimedia-{project}-{page.get('id', key)}",
-                        title=title,
-                        imageUrl=image_url,
-                        thumbUrl=image_url,
-                        sourceUrl=source_url,
-                        author=f"{project}.wikipedia.org",
-                        license="wikimedia",
-                        provider="wikimedia",
-                        alt=str(description)[:180] or title,
-                    )
+            source_url = (
+                summary.get("content_urls", {})
+                .get("desktop", {})
+                .get("page", f"https://{project}.wikipedia.org/wiki/{key}")
+            )
+            title = summary.get("title") or page.get("title") or key.replace("_", " ")
+            description = summary.get("extract") or page.get("description") or title
+
+            assets.append(
+                MediaAsset(
+                    assetId=f"wikimedia-{project}-{page.get('id', key)}",
+                    title=title,
+                    imageUrl=image_url,
+                    thumbUrl=image_url,
+                    sourceUrl=source_url,
+                    author=f"{project}.wikipedia.org",
+                    license="wikimedia",
+                    provider="wikimedia",
+                    alt=str(description)[:180] or title,
                 )
-                seen_urls.add(image_url)
-                if len(assets) >= limit:
-                    break
+            )
+            seen_urls.add(image_url)
 
     return assets
+
+
+async def search_wikimedia_assets(queries: list[str], limit: int = 6) -> list[MediaAsset]:
+    cache_key = "|".join(queries[:4])
+    now = time.monotonic()
+    cached = _CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _CACHE_TTL:
+        return cached[1][:limit]
+
+    async with httpx.AsyncClient(
+        timeout=20.0,
+        headers={"User-Agent": "HistoryAI/1.0 (school-project contact: local-app)"},
+    ) as client:
+        tasks = [_search_single_query(client, q.strip(), limit) for q in queries if q.strip()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    seen_urls: set[str] = set()
+    assets: list[MediaAsset] = []
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        for asset in result:
+            if asset.imageUrl not in seen_urls and len(assets) < limit:
+                assets.append(asset)
+                seen_urls.add(asset.imageUrl)
+
+    _CACHE[cache_key] = (now, assets)
+    return assets[:limit]
 
 
 async def generate_ai_hero_asset(topic: str, hero_subtitle: str, visual_mode: str) -> MediaAsset | None:
@@ -162,12 +195,15 @@ async def generate_ai_hero_asset(topic: str, hero_subtitle: str, visual_mode: st
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{settings.openai_base_url.rstrip('/')}/images/generations",
-            headers=headers,
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{settings.openai_base_url.rstrip('/')}/images/generations",
+                headers=headers,
+                json=payload,
+            )
+    except Exception:
+        return None
 
     if response.status_code >= 400:
         return None

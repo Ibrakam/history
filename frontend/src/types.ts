@@ -1,11 +1,12 @@
 export type VisualMode = "chronicle" | "empire" | "warfront" | "reform" | "archive";
+export type MaterialCollection = "auto" | "uzbekistan_history" | "history";
 export type SectionType =
   | "narrative"
   | "timeline"
   | "person_card_grid"
   | "artifact_gallery"
   | "quote_callout";
-export type AssetProvider = "wikimedia" | "openai" | "demo";
+export type AssetProvider = "wikimedia" | "openai" | "demo" | "upload";
 
 export type AdminQuizQuestion = {
   prompt: string;
@@ -154,6 +155,21 @@ export type QuizSubmitResponse = {
   }[];
 };
 
+export type QuizAttempt = {
+  id: number;
+  studentName: string;
+  score: number;
+  total: number;
+  percentage: number;
+  createdAt: string;
+};
+
+export type QuizResultsResponse = {
+  lessonId: number;
+  lessonTitle: string;
+  attempts: QuizAttempt[];
+};
+
 export type LessonForm = {
   id?: number;
   title: string;
@@ -166,4 +182,3 @@ export type LessonForm = {
   status?: string;
   slug?: string;
 };
-

@@ -7,8 +7,8 @@ from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .media import build_demo_asset, generate_ai_hero_asset, search_wikimedia_assets
-from .models import Lesson, LessonStatus, QuizQuestion
+from .media import build_demo_asset, build_search_queries, generate_ai_hero_asset, search_wikimedia_assets
+from .models import Lesson, LessonStatus, QuizAttempt, QuizQuestion
 from .sanitization import sanitize_lesson_html
 from .schemas import AdminQuizQuestion, ImageSlot, LessonLayout, LessonSaveRequest
 
@@ -19,29 +19,11 @@ def normalize_visual_mode(visual_mode: str) -> str:
     return "chronicle"
 
 
-def _queries_for_role(label: str, topic: str, role: str) -> list[str]:
-    role_queries = {
-        "hero": [f"{topic} историческая живопись", f"{topic} реконструкция", f"{topic} архитектура"],
-        "section": [label, f"историческая сцена {topic}", topic],
-        "timeline": [f"{topic} карта", f"{topic} хронология", f"{topic} схема"],
-        "person": [label, f"{label} портрет", f"{topic} исторический портрет"],
-        "artifact": [label, f"{topic} артефакт", f"{topic} предметы культуры"],
-        "quote": [label, f"{topic} рукопись", f"{topic} исторический документ"],
-    }.get(role, [label, topic])
-
-    ordered: list[str] = []
-    for query in role_queries:
-        normalized = query.strip()
-        if normalized and normalized not in ordered:
-            ordered.append(normalized)
-    return ordered[:6]
-
-
 def _make_image_slot(slot_id: str, label: str, role: str, topic: str) -> dict:
     return {
         "slotId": slot_id,
         "label": label,
-        "searchQueries": _queries_for_role(label, topic, role),
+        "searchQueries": build_search_queries(label, topic, role),
         "selectedAsset": None,
         "candidateAssets": [],
         "role": role,
@@ -59,7 +41,7 @@ def ensure_lesson_layout_slots(db: Session, lesson: Lesson) -> Lesson:
 
     for slot in slots:
         if "searchQueries" not in slot:
-            slot["searchQueries"] = _queries_for_role(slot.get("label", lesson.topic), lesson.topic, slot.get("role", "section"))
+            slot["searchQueries"] = build_search_queries(slot.get("label", lesson.topic), lesson.topic, slot.get("role", "section"))
             changed = True
         if "candidateAssets" not in slot:
             slot["candidateAssets"] = [slot["selectedAsset"]] if slot.get("selectedAsset") else []
@@ -334,3 +316,35 @@ async def refresh_lesson_slot_images(db: Session, lesson: Lesson, slot_id: str) 
     db.commit()
     db.refresh(lesson)
     return ImageSlot.model_validate(slot)
+
+
+def create_quiz_attempt(
+    db: Session,
+    lesson_id: int,
+    student_name: str,
+    score: int,
+    total: int,
+    percentage: float,
+    answers: list[int | None],
+) -> QuizAttempt:
+    attempt = QuizAttempt(
+        lesson_id=lesson_id,
+        student_name=student_name,
+        score=score,
+        total=total,
+        percentage=percentage,
+        answers=answers,
+    )
+    db.add(attempt)
+    db.commit()
+    db.refresh(attempt)
+    return attempt
+
+
+def get_quiz_attempts(db: Session, lesson_id: int) -> list[QuizAttempt]:
+    query = (
+        select(QuizAttempt)
+        .where(QuizAttempt.lesson_id == lesson_id)
+        .order_by(QuizAttempt.created_at.desc())
+    )
+    return list(db.scalars(query))

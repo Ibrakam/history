@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 VisualMode = Literal["chronicle", "empire", "warfront", "reform", "archive"]
 SectionType = Literal["narrative", "timeline", "person_card_grid", "artifact_gallery", "quote_callout"]
-AssetProvider = Literal["wikimedia", "openai", "demo"]
+AssetProvider = Literal["wikimedia", "openai", "demo", "upload"]
+MaterialCollection = Literal["auto", "uzbekistan_history", "history"]
 
 
 class TokenResponse(BaseModel):
@@ -109,6 +110,7 @@ class LessonLayout(BaseModel):
 
 class GenerateLessonRequest(BaseModel):
     topic: str = Field(min_length=2, max_length=200)
+    materialCollection: MaterialCollection = "auto"
 
 
 class GenerateLessonResponse(BaseModel):
@@ -180,6 +182,7 @@ class PublicLessonDetail(BaseModel):
 
 
 class QuizSubmitRequest(BaseModel):
+    studentName: str = Field(min_length=1, max_length=100)
     answers: list[int | None]
 
 
@@ -198,3 +201,18 @@ class QuizSubmitResponse(BaseModel):
     total: int
     percentage: float
     answerReview: list[QuizAnswerReview]
+
+
+class QuizAttemptResponse(BaseModel):
+    id: int
+    studentName: str
+    score: int
+    total: int
+    percentage: float
+    createdAt: datetime
+
+
+class QuizResultsResponse(BaseModel):
+    lessonId: int
+    lessonTitle: str
+    attempts: list[QuizAttemptResponse]

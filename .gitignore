@@ -16,3 +16,8 @@ backend/.env
 frontend/.env
 frontend/vite.config.js
 frontend/vite.config.d.ts
+backend/materials/.index/
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep

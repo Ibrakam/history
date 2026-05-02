@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..crud import get_published_lesson_by_slug, lesson_to_public_detail
+from ..crud import create_quiz_attempt, get_published_lesson_by_slug, lesson_to_public_detail
 from ..deps import DbSession
 from ..schemas import PublicLessonDetail, QuizAnswerReview, QuizSubmitRequest, QuizSubmitResponse
 
@@ -46,4 +46,15 @@ def submit_quiz(slug: str, payload: QuizSubmitRequest, db: DbSession) -> QuizSub
 
     total = len(lesson.quiz_questions)
     percentage = round((score / total) * 100, 2) if total else 0.0
+
+    create_quiz_attempt(
+        db=db,
+        lesson_id=lesson.id,
+        student_name=payload.studentName.strip(),
+        score=score,
+        total=total,
+        percentage=percentage,
+        answers=payload.answers,
+    )
+
     return QuizSubmitResponse(score=score, total=total, percentage=percentage, answerReview=reviews)

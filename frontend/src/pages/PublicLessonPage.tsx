@@ -11,6 +11,7 @@ export function PublicLessonPage() {
   const [answers, setAnswers] = useState<Array<number | null>>([]);
   const [result, setResult] = useState<QuizSubmitResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [studentName, setStudentName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,10 +34,14 @@ export function PublicLessonPage() {
   }, [slug]);
 
   const handleSubmit = async () => {
+    if (!studentName.trim()) {
+      setError("Введите ваше имя перед отправкой теста.");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
-      const response = await submitQuiz(slug, answers);
+      const response = await submitQuiz(slug, studentName.trim(), answers);
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось проверить тест.");
@@ -113,14 +118,29 @@ export function PublicLessonPage() {
             </div>
           ))}
 
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handleSubmit()}
-            disabled={submitting}
-          >
-            {submitting ? "Проверяем..." : "Проверить тест"}
-          </button>
+          {!result ? (
+            <label className="student-name-field">
+              Ваше имя
+              <input
+                value={studentName}
+                onChange={(event) => setStudentName(event.target.value)}
+                placeholder="Иванов Иван"
+              />
+            </label>
+          ) : null}
+
+          {error ? <div className="form-error">{error}</div> : null}
+
+          {!result ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || !studentName.trim()}
+            >
+              {submitting ? "Проверяем..." : "Проверить тест"}
+            </button>
+          ) : null}
 
           {result ? (
             <div className="result-card">

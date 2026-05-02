@@ -4,7 +4,10 @@ import type {
   LessonDetail,
   LessonForm,
   LessonListItem,
+  MaterialCollection,
+  MediaAsset,
   PublicLessonDetail,
+  QuizResultsResponse,
   QuizSubmitResponse,
 } from "./types";
 
@@ -77,12 +80,15 @@ export function fetchLesson(id: number): Promise<LessonDetail> {
   return request(`/api/admin/lessons/${id}`, undefined, true);
 }
 
-export function generateLesson(topic: string): Promise<GenerateLessonResponse> {
+export function generateLesson(
+  topic: string,
+  materialCollection: MaterialCollection = "auto",
+): Promise<GenerateLessonResponse> {
   return request(
     "/api/admin/lessons/generate",
     {
       method: "POST",
-      body: JSON.stringify({ topic }),
+      body: JSON.stringify({ topic, materialCollection }),
     },
     true,
   );
@@ -108,6 +114,34 @@ export function updateLesson(id: number, payload: LessonForm): Promise<LessonDet
     },
     true,
   );
+}
+
+export async function uploadImageAsset(file: File): Promise<MediaAsset> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${API_BASE}/api/admin/uploads/image`, {
+    method: "POST",
+    body: formData,
+    headers,
+  });
+
+  if (!response.ok) {
+    let detail = "Не удалось загрузить изображение.";
+    try {
+      const payload = await response.json();
+      detail = payload.detail ?? detail;
+    } catch {
+      detail = response.statusText || detail;
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as MediaAsset;
 }
 
 export function refreshSlotImages(id: number, slotId: string): Promise<{ slot: ImageSlot }> {
@@ -137,9 +171,17 @@ export function fetchPublicLesson(slug: string): Promise<PublicLessonDetail> {
   return request(`/api/public/lessons/${slug}`);
 }
 
-export function submitQuiz(slug: string, answers: Array<number | null>): Promise<QuizSubmitResponse> {
+export function submitQuiz(
+  slug: string,
+  studentName: string,
+  answers: Array<number | null>,
+): Promise<QuizSubmitResponse> {
   return request(`/api/public/lessons/${slug}/submit-quiz`, {
     method: "POST",
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ studentName, answers }),
   });
+}
+
+export function fetchQuizResults(lessonId: number): Promise<QuizResultsResponse> {
+  return request(`/api/admin/lessons/${lessonId}/quiz-results`, undefined, true);
 }
