@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from copy import deepcopy
@@ -633,6 +634,7 @@ async def _enrich_layout_assets(lesson: dict) -> dict:
 async def _generate_blueprint_via_chat(topic: str, source_chunks: list[SourceChunk] | None = None) -> dict:
     settings = get_settings()
     source_chunks = source_chunks or []
+    is_local_ai = _is_local_ai_base_url(settings.openai_base_url)
     request_payload = {
         "model": settings.openai_model,
         "messages": [
@@ -640,8 +642,10 @@ async def _generate_blueprint_via_chat(topic: str, source_chunks: list[SourceChu
             {"role": "user", "content": _build_generation_user_prompt(topic, source_chunks)},
         ],
         "response_format": {"type": "json_object"},
-        "temperature": 0.7,
+        "temperature": 0.4 if is_local_ai else 0.7,
     }
+    if is_local_ai:
+        request_payload["max_tokens"] = 1800
 
     headers = {
         "Content-Type": "application/json",
@@ -649,20 +653,21 @@ async def _generate_blueprint_via_chat(topic: str, source_chunks: list[SourceChu
     if settings.openai_api_key:
         headers["Authorization"] = f"Bearer {settings.openai_api_key}"
 
-    async with httpx.AsyncClient(timeout=settings.ai_request_timeout) as client:
-        response = await client.post(
-            f"{settings.openai_base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=request_payload,
-        )
-        if response.status_code == 400 and "response_format" in request_payload:
-            fallback_payload = dict(request_payload)
-            fallback_payload.pop("response_format", None)
+    async with asyncio.timeout(settings.ai_request_timeout):
+        async with httpx.AsyncClient(timeout=settings.ai_request_timeout) as client:
             response = await client.post(
                 f"{settings.openai_base_url.rstrip('/')}/chat/completions",
                 headers=headers,
-                json=fallback_payload,
+                json=request_payload,
             )
+            if response.status_code == 400 and "response_format" in request_payload:
+                fallback_payload = dict(request_payload)
+                fallback_payload.pop("response_format", None)
+                response = await client.post(
+                    f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=fallback_payload,
+                )
 
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"AI API error ({response.status_code}): {response.text[:500]}")
@@ -705,7 +710,7 @@ async def generate_lesson(topic: str, material_collection: str = "auto") -> dict
     else:
         try:
             lesson = await _generate_blueprint_via_chat(topic, source_chunks)
-        except (HTTPException, httpx.HTTPError):
+        except (HTTPException, TimeoutError, httpx.HTTPError):
             if not source_chunks or not is_local_ai:
                 raise
             lesson = _build_source_fallback_lesson(topic, source_chunks)
