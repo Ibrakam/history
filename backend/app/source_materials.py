@@ -186,7 +186,13 @@ def _sentence_split(text: str) -> list[str]:
     prepared = re.sub(r"([A-Za-zА-Яа-яЁёЎўҚқҒғҲҳІі])- +([A-Za-zА-Яа-яЁёЎўҚқҒғҲҳІі])", r"\1\2", text)
     prepared = re.sub(r"\s+", " ", prepared)
     sentences = re.split(r"(?<=[.!?])\s+", prepared)
-    return [sentence.strip(" .;:") for sentence in sentences if 45 <= len(sentence.strip()) <= 260]
+    cleaned = []
+    for sentence in sentences:
+        sentence = re.sub(r"^\d{1,3}\s+", "", sentence.strip(" .;:"))
+        sentence = re.sub(r"\s+", " ", sentence)
+        if 45 <= len(sentence) <= 260:
+            cleaned.append(sentence)
+    return cleaned
 
 
 def _source_statement_candidates(chunks: list[SourceChunk], topic: str, limit: int = 12) -> list[str]:
@@ -219,6 +225,10 @@ def _source_statement_candidates(chunks: list[SourceChunk], topic: str, limit: i
     return statements
 
 
+def source_statement_candidates(chunks: list[SourceChunk], topic: str, limit: int = 12) -> list[str]:
+    return _source_statement_candidates(chunks, topic, limit=limit)
+
+
 def _year_distractors(year: int) -> list[str]:
     offsets = [-4, 3, 9, 12, -11]
     values = [str(year + offset) for offset in offsets if year + offset > 0]
@@ -242,7 +252,7 @@ def build_source_quiz(topic: str, chunks: list[SourceChunk], min_questions: int 
     questions: list[dict] = []
 
     for statement in statements:
-        year_match = re.search(r"\b(\d{3,4})\b", statement)
+        year_match = re.search(r"\b(1\d{3}|20\d{2})\b", statement)
         if not year_match:
             continue
         year = int(year_match.group(1))

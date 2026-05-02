@@ -13,7 +13,7 @@ from .config import get_settings
 from .demo_content import build_demo_lesson
 from .media import build_demo_asset, build_search_queries, generate_ai_hero_asset, search_wikimedia_assets
 from .schemas import GenerateLessonResponse, LessonLayout, MediaAsset
-from .source_materials import SourceChunk, build_source_quiz, format_source_context, search_materials
+from .source_materials import SourceChunk, build_source_quiz, format_source_context, search_materials, source_statement_candidates
 from .theme_logic import infer_visual_mode
 
 VALID_VISUAL_MODES = {"chronicle", "empire", "warfront", "reform", "archive"}
@@ -374,16 +374,7 @@ def _build_source_fallback_lesson(topic: str, source_chunks: list[SourceChunk]) 
     if not source_chunks:
         return lesson
 
-    statements = []
-    for chunk in source_chunks[:5]:
-        for sentence in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", chunk.text)):
-            sentence = sentence.strip()
-            if 50 <= len(sentence) <= 260:
-                statements.append(sentence)
-            if len(statements) >= 8:
-                break
-        if len(statements) >= 8:
-            break
+    statements = source_statement_candidates(source_chunks, topic, limit=8)
 
     visual_mode = infer_visual_mode(topic)
     lesson["title"] = f"{topic.strip()}: материал по учебнику"
