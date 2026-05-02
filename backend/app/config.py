@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     use_demo_ai: bool = False
     enable_external_media_search: bool = True
     enable_source_materials: bool = True
+    source_first_generation: bool = False
     source_material_limit: int = 10
     source_material_min_score: float = 4.0
     frontend_origin: str = "http://localhost:5173"

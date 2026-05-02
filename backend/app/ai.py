@@ -695,8 +695,9 @@ async def generate_lesson(topic: str, material_collection: str = "auto") -> dict
     use_ai = _should_use_ai()
     is_local_ai = _is_local_ai_base_url(settings.openai_base_url)
     collection = None if material_collection == "auto" else material_collection
-    source_chunks = search_materials(topic, collection=collection) if use_ai else []
-    if use_ai and settings.enable_source_materials and not source_chunks:
+    needs_sources = settings.enable_source_materials and (use_ai or settings.source_first_generation)
+    source_chunks = search_materials(topic, collection=collection) if needs_sources else []
+    if needs_sources and not source_chunks:
         scope = "загруженных материалах" if not collection else f"разделе материалов «{collection}»"
         raise HTTPException(
             status_code=422,
@@ -705,7 +706,9 @@ async def generate_lesson(topic: str, material_collection: str = "auto") -> dict
                 "Выберите другой раздел источников или добавьте учебник с этой темой."
             ),
         )
-    if not use_ai:
+    if settings.source_first_generation and source_chunks:
+        lesson = _build_source_fallback_lesson(topic, source_chunks)
+    elif not use_ai:
         lesson = build_demo_lesson(topic)
     else:
         try:
