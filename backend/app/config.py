@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     openai_model: str = "llama-3.3-70b-versatile"
     openai_image_model: str = "gpt-image-1"
     openai_base_url: str = "https://api.groq.com/openai/v1"
+    ai_request_timeout: float = 120.0
     use_demo_ai: bool = False
     enable_external_media_search: bool = True
     enable_source_materials: bool = True

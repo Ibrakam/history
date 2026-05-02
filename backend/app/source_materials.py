@@ -566,5 +566,5 @@ def search_materials(topic: str, collection: str | None = None, limit: int | Non
     return scored[:limit]
 
 
-def format_source_context(chunks: list[SourceChunk]) -> str:
-    return "\n\n".join(chunk.to_prompt_block(index) for index, chunk in enumerate(chunks, start=1))
+def format_source_context(chunks: list[SourceChunk], max_chars: int = 1400) -> str:
+    return "\n\n".join(chunk.to_prompt_block(index, max_chars=max_chars) for index, chunk in enumerate(chunks, start=1))

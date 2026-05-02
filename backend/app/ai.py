@@ -567,6 +567,10 @@ def _should_use_ai() -> bool:
 
 
 def _build_generation_user_prompt(topic: str, source_chunks: list[SourceChunk]) -> str:
+    settings = get_settings()
+    is_local_ai = _is_local_ai_base_url(settings.openai_base_url)
+    prompt_chunks = source_chunks[:4] if is_local_ai else source_chunks
+    prompt_chunk_chars = 650 if is_local_ai else 1400
     base = (
         f"Тема урока: {topic}. "
         "Сгенерируй визуальный урок истории для школьного проекта с ярким hero и насыщенными секциями."
@@ -582,7 +586,7 @@ def _build_generation_user_prompt(topic: str, source_chunks: list[SourceChunk]) 
         f"{base}\n\n"
         "Ниже фрагменты школьных материалов. Основные факты, объяснения и все вопросы теста бери из них. "
         "Можно сжать и переформулировать текст, но нельзя добавлять неподтвержденные точные сведения.\n\n"
-        f"{format_source_context(source_chunks)}"
+        f"{format_source_context(prompt_chunks, max_chars=prompt_chunk_chars)}"
     )
 
 
@@ -645,7 +649,7 @@ async def _generate_blueprint_via_chat(topic: str, source_chunks: list[SourceChu
     if settings.openai_api_key:
         headers["Authorization"] = f"Bearer {settings.openai_api_key}"
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=settings.ai_request_timeout) as client:
         response = await client.post(
             f"{settings.openai_base_url.rstrip('/')}/chat/completions",
             headers=headers,
@@ -684,6 +688,7 @@ async def _generate_blueprint_via_chat(topic: str, source_chunks: list[SourceChu
 async def generate_lesson(topic: str, material_collection: str = "auto") -> dict:
     settings = get_settings()
     use_ai = _should_use_ai()
+    is_local_ai = _is_local_ai_base_url(settings.openai_base_url)
     collection = None if material_collection == "auto" else material_collection
     source_chunks = search_materials(topic, collection=collection) if use_ai else []
     if use_ai and settings.enable_source_materials and not source_chunks:
@@ -698,7 +703,12 @@ async def generate_lesson(topic: str, material_collection: str = "auto") -> dict
     if not use_ai:
         lesson = build_demo_lesson(topic)
     else:
-        lesson = await _generate_blueprint_via_chat(topic, source_chunks)
+        try:
+            lesson = await _generate_blueprint_via_chat(topic, source_chunks)
+        except (HTTPException, httpx.HTTPError):
+            if not source_chunks or not is_local_ai:
+                raise
+            lesson = _build_source_fallback_lesson(topic, source_chunks)
 
     lesson["topic"] = topic.strip()
     lesson["visualMode"] = lesson.get("visualMode") or lesson.get("lessonLayout", {}).get("visualMode") or infer_visual_mode(topic)
